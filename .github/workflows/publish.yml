@@ -45,7 +45,7 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: "PowerToys.Plugin.VSCodeWorkspaces-*.zip"
+          files: "PowerToys.Run.Plugin.VSCodeWorkspaces-*.zip"
           tag_name: "v${{steps.version.outputs.prop}}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
