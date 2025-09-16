@@ -4,7 +4,7 @@
 
 using System.Text.RegularExpressions;
 
-namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
 {
     public class ParseVSCodeUri
     {
@@ -14,11 +14,11 @@ namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
 
         private static readonly Regex RemoteWSLWorkspace = new Regex(@"^vscode-remote://wsl\+(.+?(?=\/))(.+)$", RegexOptions.Compiled);
 
-        private static readonly Regex CodespacesWorkspace = new Regex(@"^vscode-remote://vsonline\+(.+?(?=\/))(.+)$", RegexOptions.Compiled);
+        private static readonly Regex CodespacesWorkspace = new Regex(@"^vscode-remote://(vsonline|codespaces)\+(.+?(?=\/))(.+)$", RegexOptions.Compiled);
 
         private static readonly Regex DevContainerWorkspace = new Regex(@"^vscode-remote://dev-container\+(.+?(?=\/))(.+)$", RegexOptions.Compiled);
 
-        public static (WorkspaceLocation? workspaceLocation, string MachineName, string Path) GetTypeWorkspace(string uri)
+        public static (WorkspaceLocation? workspaceLocation, string? MachineName, string? Path) GetTypeWorkspace(string uri)
         {
             if (LocalWorkspace.IsMatch(uri))
             {
@@ -53,7 +53,7 @@ namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
 
                 if (match.Groups.Count > 1)
                 {
-                    return (WorkspaceLocation.Codespaces, null, match.Groups[2].Value);
+                    return (WorkspaceLocation.Codespaces, match.Groups[2].Value, match.Groups[3].Value);
                 }
             }
             else if (DevContainerWorkspace.IsMatch(uri))

@@ -6,7 +6,7 @@ using System;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-namespace Flow.Plugin.VSCodeWorkspaces.VSCodeHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper
 {
     public enum VSCodeVersion
     {
@@ -23,14 +23,14 @@ namespace Flow.Plugin.VSCodeWorkspaces.VSCodeHelper
 
         public string AppData { get; set; } = string.Empty;
 
-        public ImageSource WorkspaceIcon() => WorkspaceIconBitMap;
+        public string WorkspaceIcon { get; set; } = string.Empty;
 
-        public ImageSource RemoteIcon() => RemoteIconBitMap;
+        public string RemoteIcon { get; set; } = string.Empty;
 
-        public BitmapImage WorkspaceIconBitMap { get; set; }
+        public BitmapImage? WorkspaceIconBitMap { get; set; }
 
-        public BitmapImage RemoteIconBitMap { get; set; }
-        public bool Equals(VSCodeInstance other)
+        public BitmapImage? RemoteIconBitMap { get; set; }
+        public bool Equals(VSCodeInstance? other)
         {
             if (ReferenceEquals(null, other))
                 return false;
@@ -40,13 +40,12 @@ namespace Flow.Plugin.VSCodeWorkspaces.VSCodeHelper
                    && string.Equals(ExecutablePath, other.ExecutablePath, StringComparison.InvariantCultureIgnoreCase)
                    && string.Equals(AppData, other.AppData, StringComparison.InvariantCultureIgnoreCase);
         }
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             if (ReferenceEquals(null, obj))
                 return false;
             if (ReferenceEquals(this, obj))
                 return true;
-
             return obj is VSCodeInstance instance && Equals(instance);
         }
         public override int GetHashCode()

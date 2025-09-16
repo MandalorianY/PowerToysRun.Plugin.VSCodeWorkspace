@@ -1,6 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 
-namespace Flow.Plugin.VSCodeWorkspaces
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
 {
     public class Settings
     {

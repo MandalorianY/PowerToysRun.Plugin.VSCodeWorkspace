@@ -3,28 +3,31 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using Flow.Plugin.VSCodeWorkspaces.Properties;
-using Flow.Plugin.VSCodeWorkspaces.VSCodeHelper;
+using System.ComponentModel;
+using System.IO;
+using System.Text.Json;
+using Community.PowerToys.Run.Plugin.VSCodeWorkspaces.Properties;
+using Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper;
 
-namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
 {
     public record VsCodeWorkspace
     {
-        public PathString Path { get; init; }
+        public PathString Path { get; init; } = string.Empty;
 
-        public PathString RelativePath { get; init; }
+        public PathString RelativePath { get; init; } = string.Empty;
 
-        public PathString FolderName { get; init; }
+        public PathString FolderName { get; init; } = string.Empty;
         
-        public string Label { get; init; }
+        public string? Label { get; init; }
 
-        public string ExtraInfo { get; init; }
+        public string? ExtraInfo { get; init; }
 
         public WorkspaceLocation WorkspaceLocation { get; init; }
         
         public WorkspaceType WorkspaceType { get; init; }
 
-        public VSCodeInstance VSCodeInstance { get; init; }
+        public VSCodeInstance? VSCodeInstance { get; init; }
 
         public string WorkspaceTypeToString()
         {

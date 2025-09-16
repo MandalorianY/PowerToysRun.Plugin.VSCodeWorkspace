@@ -4,11 +4,11 @@
 
 using System.Text.Json.Serialization;
 
-namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
 {
     public class VSCodeStorageFile
     {
         [JsonPropertyName("openedPathsList")]
-        public OpenedPathsList OpenedPathsList { get; set; }
+        public OpenedPathsList? OpenedPathsList { get; set; }
     }
 }

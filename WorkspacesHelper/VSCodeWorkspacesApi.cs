@@ -8,11 +8,10 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Flow.Plugin.VSCodeWorkspaces.VSCodeHelper;
-using JetBrains.Annotations;
+using Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper;
 using Microsoft.Data.Sqlite;
 
-namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
 {
     public class VSCodeWorkspacesApi
     {
@@ -20,7 +19,7 @@ namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
         {
         }
 
-        public static VsCodeWorkspace ParseVSCodeUri(string uri, VSCodeInstance vscodeInstance)
+        public static VsCodeWorkspace? ParseVSCodeUri(string? uri, VSCodeInstance vscodeInstance)
         {
             if (uri is not null)
             {
@@ -39,9 +38,9 @@ namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
                 return new VsCodeWorkspace()
                 {
                     Path = unescapeUri,
-                    RelativePath = typeWorkspace.Path,
-                    FolderName = folderName,
-                    ExtraInfo = typeWorkspace.MachineName,
+                    RelativePath = typeWorkspace.Path ?? string.Empty,
+                    FolderName = folderName ?? string.Empty,
+                    ExtraInfo = typeWorkspace.MachineName ?? string.Empty,
                     WorkspaceLocation = typeWorkspace.workspaceLocation.Value,
                     VSCodeInstance = vscodeInstance,
                 };
@@ -60,98 +59,148 @@ namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
 
                 foreach (var vscodeInstance in VSCodeInstances.Instances)
                 {
-                    // storage.json contains opened Workspaces
-                    var vscodeStorage = Path.Combine(vscodeInstance.AppData, "storage.json");
-
-                    if (File.Exists(vscodeStorage))
+                    // Try SQLite database first (preferred method)
+                    var sqliteWorkspaces = GetWorkspacesFromSqliteDatabase(vscodeInstance);
+                    if (sqliteWorkspaces.Count != 0)
                     {
-                        var fileContent = File.ReadAllText(vscodeStorage);
-
-                        try
-                        {
-                            var vscodeStorageFile = JsonSerializer.Deserialize<VSCodeStorageFile>(fileContent);
-
-                            if (vscodeStorageFile != null)
-                            {
-                                // for previous versions of vscode
-                                if (vscodeStorageFile.OpenedPathsList?.Workspaces3 != null)
-                                {
-                                    results.AddRange(
-                                        vscodeStorageFile.OpenedPathsList.Workspaces3
-                                            .Select(workspaceUri => ParseVSCodeUri(workspaceUri, vscodeInstance))
-                                            .Where(uri => uri != null)
-                                            .Select(uri => (VsCodeWorkspace)uri));
-                                }
-
-                                // vscode v1.55.0 or later
-                                if (vscodeStorageFile.OpenedPathsList?.Entries != null)
-                                {
-                                    results.AddRange(vscodeStorageFile.OpenedPathsList.Entries
-                                        .Select(x => x.FolderUri)
-                                        .Select(workspaceUri => ParseVSCodeUri(workspaceUri, vscodeInstance))
-                                        .Where(uri => uri != null));
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            var message = $"Failed to deserialize ${vscodeStorage}";
-                            Main.Context.API.LogException("VSCodeWorkspaceApi", message, ex);
-                        }
+                        // SQLite workspaces are already in correct order (most recent first)
+                        results.AddRange(sqliteWorkspaces);
                     }
-
-                    // for vscode v1.64.0 or later
-                    using var connection = new SqliteConnection(
-                        $"Data Source={vscodeInstance.AppData}/User/globalStorage/state.vscdb;mode=readonly;cache=shared;");
-                    connection.Open();
-                    var command = connection.CreateCommand();
-                    command.CommandText = "SELECT value FROM ItemTable where key = 'history.recentlyOpenedPathsList'";
-                    var result = command.ExecuteScalar();
-                    if (result != null)
+                    else
                     {
-                        using var historyDoc = JsonDocument.Parse(result.ToString()!);
-                        var root = historyDoc.RootElement;
-                        if (!root.TryGetProperty("entries", out var entries))
-                            continue;
-                        foreach (var entry in entries.EnumerateArray())
-                        {
-                            if (entry.TryGetProperty("folderUri", out var folderUri) &&
-                                ParseFolderEntry(folderUri, vscodeInstance, entry) is { } folderWorkspace)
-                            {
-                                results.Add(folderWorkspace);
-                            }
-                            else if (entry.TryGetProperty("workspace", out var workspaceInfo) &&
-                                     ParseWorkspaceEntry(workspaceInfo, vscodeInstance, entry) is { } workspace)
-                            {
-                                results.Add(workspace);
-                            }
-                        }
+                        // Fallback to legacy storage.json only if SQLite failed
+                        var legacyWorkspaces = GetWorkspacesFromLegacyStorage(vscodeInstance);
+                        results.AddRange(legacyWorkspaces);
                     }
                 }
 
                 return results;
             }
         }
+        private List<VsCodeWorkspace> GetWorkspacesFromSqliteDatabase(VSCodeInstance vscodeInstance)
+        {
+            var workspaces = new List<VsCodeWorkspace>();
+            
+            try
+            {
+                var dbPath = Path.Combine(vscodeInstance.AppData, "User", "globalStorage", "state.vscdb");
+                using var connection = new SqliteConnection($"Data Source={dbPath};mode=readonly;cache=shared;");
+                connection.Open();
+                
+                var command = connection.CreateCommand();
+                command.CommandText = "SELECT value FROM ItemTable WHERE key = 'history.recentlyOpenedPathsList'";
+                var result = command.ExecuteScalar();
+                
+                if (result?.ToString() is { } resultString)
+                {
+                    using var historyDoc = JsonDocument.Parse(resultString);
+                    var root = historyDoc.RootElement;
+                    
+                    if (root.TryGetProperty("entries", out var entries))
+                    {
+                        foreach (var entry in entries.EnumerateArray())
+                        {
+                            // Parse folder entries
+                            if (entry.TryGetProperty("folderUri", out var folderUri) &&
+                                ParseFolderEntry(folderUri, vscodeInstance, entry) is { } folderWorkspace)
+                            {
+                                workspaces.Add(folderWorkspace);
+                            }
+                            // Parse workspace entries
+                            else if (entry.TryGetProperty("workspace", out var workspaceInfo) &&
+                                     ParseWorkspaceEntry(workspaceInfo, vscodeInstance, entry) is { } workspace)
+                            {
+                                workspaces.Add(workspace);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Wox.Plugin.Logger.Log.Warn($"VSCodeWorkspaceApi: Failed to read SQLite database for {vscodeInstance.VSCodeVersion}. Exception: {ex.Message}", typeof(VSCodeWorkspacesApi));
+            }
 
-        [CanBeNull]
-        private VsCodeWorkspace ParseWorkspaceEntry(JsonElement workspaceInfo, VSCodeInstance vscodeInstance,
+            return workspaces;
+        }
+
+        private List<VsCodeWorkspace> GetWorkspacesFromLegacyStorage(VSCodeInstance vscodeInstance)
+        {
+            var workspaces = new List<VsCodeWorkspace>();
+            var storagePath = Path.Combine(vscodeInstance.AppData, "storage.json");
+
+            if (!File.Exists(storagePath))
+            {
+                return workspaces;
+            }
+
+            try
+            {
+                var fileContent = File.ReadAllText(storagePath);
+                var storageFile = JsonSerializer.Deserialize<VSCodeStorageFile>(fileContent);
+
+                if (storageFile?.OpenedPathsList != null)
+                {
+                    // Handle legacy workspaces (older VS Code versions)
+                    if (storageFile.OpenedPathsList.Workspaces3 != null)
+                    {
+                        var legacyWorkspaces = storageFile.OpenedPathsList.Workspaces3
+                            .Select(uri => ParseVSCodeUri(uri, vscodeInstance))
+                            .Where(workspace => workspace != null)
+                            .Cast<VsCodeWorkspace>()
+                            .ToList();
+                        
+                        legacyWorkspaces.Reverse(); // Most recent first
+                        workspaces.AddRange(legacyWorkspaces);
+                    }
+
+                    // Handle newer format (VS Code v1.55.0+)
+                    if (storageFile.OpenedPathsList.Entries != null)
+                    {
+                        var entries = storageFile.OpenedPathsList.Entries
+                            .Where(entry => entry.FolderUri != null)
+                            .Select(entry => ParseVSCodeUri(entry.FolderUri, vscodeInstance))
+                            .Where(workspace => workspace != null)
+                            .Cast<VsCodeWorkspace>()
+                            .ToList();
+                        
+                        entries.Reverse(); // Most recent first
+                        workspaces.AddRange(entries);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Wox.Plugin.Logger.Log.Error($"VSCodeWorkspaceApi: Failed to deserialize {storagePath}. Exception: {ex.Message}", typeof(VSCodeWorkspacesApi));
+            }
+
+            return workspaces;
+        }
+
+        private VsCodeWorkspace? ParseWorkspaceEntry(JsonElement workspaceInfo, VSCodeInstance vscodeInstance,
             JsonElement entry)
         {
             if (workspaceInfo.TryGetProperty("configPath", out var configPath))
             {
-                var workspace = ParseVSCodeUri(configPath.GetString(), vscodeInstance);
+                var configPathString = configPath.GetString();
+                if (configPathString == null) return null;
+                
+                var workspace = ParseVSCodeUri(configPathString, vscodeInstance);
                 if (workspace == null)
                     return null;
 
                 if (entry.TryGetProperty("label", out var label))
                 {
-                    var labelString = label.GetString()!;
-                    var matchGroup = WorkspaceLabelParser.Match(labelString);
-                    workspace = workspace with
+                    var labelString = label.GetString();
+                    if (labelString != null)
                     {
-                        Label = $"{matchGroup.Groups[2]} {matchGroup.Groups[1]}",
-                        WorkspaceType = WorkspaceType.Workspace
-                    };
+                        var matchGroup = WorkspaceLabelParser.Match(labelString);
+                        workspace = workspace with
+                        {
+                            Label = $"{matchGroup.Groups[2]} {matchGroup.Groups[1]}",
+                            WorkspaceType = WorkspaceType.Workspace
+                        };
+                    }
                 }
 
                 return workspace;
@@ -160,25 +209,28 @@ namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
             return null;
         }
 
-
-        [CanBeNull]
-        private VsCodeWorkspace ParseFolderEntry(JsonElement folderUri, VSCodeInstance vscodeInstance,
+        private VsCodeWorkspace? ParseFolderEntry(JsonElement folderUri, VSCodeInstance vscodeInstance,
             JsonElement entry)
         {
             var workspaceUri = folderUri.GetString();
+            if (workspaceUri == null) return null;
+            
             var workspace = ParseVSCodeUri(workspaceUri, vscodeInstance);
             if (workspace == null)
                 return null;
 
             if (entry.TryGetProperty("label", out var label))
             {
-                var labelString = label.GetString()!;
-                var matchGroup = WorkspaceLabelParser.Match(labelString);
-                workspace = workspace with
+                var labelString = label.GetString();
+                if (labelString != null)
                 {
-                    Label = $"{matchGroup.Groups[2]} {matchGroup.Groups[1]}",
-                    WorkspaceType = WorkspaceType.Folder
-                };
+                    var matchGroup = WorkspaceLabelParser.Match(labelString);
+                    workspace = workspace with
+                    {
+                        Label = $"{matchGroup.Groups[2]} {matchGroup.Groups[1]}",
+                        WorkspaceType = WorkspaceType.Folder
+                    };
+                }
             }
 
             return workspace;

@@ -4,14 +4,14 @@
 
 using System.Text.Json.Serialization;
 
-namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
 {
     public class VSCodeWorkspaceEntry
     {
         [JsonPropertyName("folderUri")]
-        public string FolderUri { get; set; }
+        public string? FolderUri { get; set; }
 
         [JsonPropertyName("label")]
-        public string Label { get; set; }
+        public string? Label { get; set; }
     }
 }

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Flow.Plugin.VSCodeWorkspaces
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
 {
     public readonly struct PathString : IEquatable<PathString>
     {
@@ -19,7 +19,7 @@ namespace Flow.Plugin.VSCodeWorkspaces
         public bool Equals(PathString other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
 
         // Default object.Equals, just in case
-        public override bool Equals(object other)
+        public override bool Equals(object? other)
         {
             if (other is PathString ps)
                 return Equals(ps);

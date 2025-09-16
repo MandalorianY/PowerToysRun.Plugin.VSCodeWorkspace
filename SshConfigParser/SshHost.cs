@@ -4,35 +4,35 @@
 
 using System.Collections.Generic;
 
-namespace Flow.Plugin.VSCodeWorkspaces.SshConfigParser
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.SshConfigParser
 {
     public class SshHost
     {
-        public string IdentityFile
+        public string? IdentityFile
         {
             get => this[nameof(IdentityFile)]?.ToString();
             set => this[nameof(IdentityFile)] = value;
         }
 
-        public string Host
+        public string? Host
         {
             get => this[nameof(Host)]?.ToString();
             set => this[nameof(Host)] = value;
         }
 
-        public string HostName
+        public string? HostName
         {
             get => this[nameof(HostName)]?.ToString();
             set => this[nameof(HostName)] = value;
         }
 
-        public string User
+        public string? User
         {
             get => this[nameof(User)]?.ToString();
             set => this[nameof(User)] = value;
         }
 
-        public string ForwardAgent
+        public string? ForwardAgent
         {
             get => this[nameof(ForwardAgent)]?.ToString();
             set => this[nameof(ForwardAgent)] = value;
@@ -40,7 +40,7 @@ namespace Flow.Plugin.VSCodeWorkspaces.SshConfigParser
 
         internal Dictionary<string, object> Properties { get; } = new Dictionary<string, object>();
 
-        public object this[string key]
+        public object? this[string key]
         {
             get
             {
@@ -54,7 +54,7 @@ namespace Flow.Plugin.VSCodeWorkspaces.SshConfigParser
 
             set
             {
-                Properties[key] = value;
+                Properties[key] = value!;
             }
         }
 

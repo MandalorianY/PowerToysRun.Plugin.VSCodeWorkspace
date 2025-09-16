@@ -15,7 +15,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: 6.0.x
+          dotnet-version: 9.0.x
       - name: get version
         id: version
         uses: notiz-dev/github-action-json-property@release
@@ -23,15 +23,27 @@ jobs:
           path: "plugin.json"
           prop_path: "Version"
       - run: echo ${{steps.version.outputs.prop}}
-      - name: Publish
+      - name: Build
         run: |
-          dotnet publish 'Flow.Plugin.VSCodeWorkspaces.csproj' -r win-x64  -c Release -o "Flow.Plugin.VSCodeWorkspaces-${{steps.version.outputs.prop}}"
-          7z a -tzip "Flow.Plugin.VSCodeWorkspaces-${{steps.version.outputs.prop}}.zip" "./Flow.Plugin.VSCodeWorkspaces-${{steps.version.outputs.prop}}/*"
-          rm -r "Flow.Plugin.VSCodeWorkspaces-${{steps.version.outputs.prop}}"
-      - name: Publish
-        uses: softprops/action-gh-release@v1
+          dotnet publish 'Community.PowerToys.Run.Plugin.VSCodeWorkspaces.csproj' -c Release -o publish_output
+      - name: Prepare package folder
+        shell: pwsh
+        run: |
+          $Version = "${{steps.version.outputs.prop}}"
+          $PackageDir = "PowerToys.Run.Plugin.VSCodeWorkspaces"
+          if (Test-Path $PackageDir) { Remove-Item $PackageDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $PackageDir | Out-Null
+          New-Item -ItemType Directory -Path "$PackageDir/Images" | Out-Null
+          Copy-Item publish_output/*.dll $PackageDir -Filter 'Community.PowerToys.Run.Plugin.VSCodeWorkspaces.dll'
+          Copy-Item publish_output/plugin.json $PackageDir/
+          Copy-Item publish_output/*.deps.json $PackageDir -Filter 'Community.PowerToys.Run.Plugin.VSCodeWorkspaces.deps.json'
+          Copy-Item publish_output/Images/*.png "$PackageDir/Images/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path $PackageDir -DestinationPath "${PackageDir}-$Version.zip"
+          Write-Host "Created archive ${PackageDir}-$Version.zip"
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
-          files: "Flow.Plugin.VSCodeWorkspaces*.zip"
+          files: "PowerToys.Plugin.VSCodeWorkspaces-*.zip"
           tag_name: "v${{steps.version.outputs.prop}}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -11,13 +11,13 @@ using System.Linq;
 using System.Reflection;
 using System.Windows.Media.Imaging;
 
-namespace Flow.Plugin.VSCodeWorkspaces.VSCodeHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper
 {
     public static class VSCodeInstances
     {
         private static string _systemPath = string.Empty;
 
-        private static readonly string _userAppDataPath = Environment.GetEnvironmentVariable("AppData");
+        private static readonly string? _userAppDataPath = Environment.GetEnvironmentVariable("AppData");
 
         public static List<VSCodeInstance> Instances { get; set; } = new();
 
@@ -41,7 +41,7 @@ namespace Flow.Plugin.VSCodeWorkspaces.VSCodeHelper
 
         private static Bitmap BitmapOverlayToCenter(Bitmap bitmap1, Bitmap overlayBitmap)
         {
-            int bitmap1Width = bitmap1.Width;
+            int bitmap1Width = bitmap1.Width; 
             int bitmap1Height = bitmap1.Height;
 
             Bitmap overlayBitmapResized = new Bitmap(overlayBitmap, new System.Drawing.Size(bitmap1Width / 2, bitmap1Height / 2));
@@ -91,6 +91,7 @@ namespace Flow.Plugin.VSCodeWorkspaces.VSCodeHelper
                     && !x.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)).ToArray();
 
                 var iconPath = Path.GetDirectoryName(newPath);
+                if (iconPath == null) continue;
 
                 if (files.Length <= 0)
                     continue;
@@ -127,21 +128,62 @@ namespace Flow.Plugin.VSCodeWorkspaces.VSCodeHelper
                 if (version == string.Empty)
                     continue;
 
+                if (_userAppDataPath == null) continue;
 
                 var portableData = Path.Join(iconPath, "data");
                 instance.AppData = Directory.Exists(portableData) ? Path.Join(portableData, "user-data") : Path.Combine(_userAppDataPath, version);
                 var iconVSCode = Path.Join(iconPath, $"{version}.exe");
 
                 var bitmapIconVscode = Icon.ExtractAssociatedIcon(iconVSCode)?.ToBitmap();
+                if (bitmapIconVscode == null) continue;
 
-                // workspace
-                var folderIcon = (Bitmap)Image.FromFile(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "//Images//folder.png");
-                instance.WorkspaceIconBitMap = Bitmap2BitmapImage(BitmapOverlayToCenter(folderIcon, bitmapIconVscode));
+                // Compose overlay icons and persist them to a temp directory so PowerToys Run can load them by path
+                var assemblyLocation = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (assemblyLocation == null) continue;
 
-                // remote
-                var monitorIcon = (Bitmap)Image.FromFile(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "//Images//monitor.png");
+                var imagesDir = Path.Combine(assemblyLocation, "Images");
+                var folderPng = Path.Combine(imagesDir, "folder.png");
+                var monitorPng = Path.Combine(imagesDir, "monitor.png");
 
-                instance.RemoteIconBitMap = Bitmap2BitmapImage(BitmapOverlayToCenter(monitorIcon, bitmapIconVscode));
+                // Fallback if images not found
+                if (!File.Exists(folderPng) || !File.Exists(monitorPng))
+                {
+                    Instances.Add(instance);
+                    continue;
+                }
+
+                using var folderIcon = (Bitmap)Image.FromFile(folderPng);
+                using var monitorIcon = (Bitmap)Image.FromFile(monitorPng);
+
+                using var workspaceOverlay = BitmapOverlayToCenter(folderIcon, bitmapIconVscode);
+                using var remoteOverlay = BitmapOverlayToCenter(monitorIcon, bitmapIconVscode);
+
+                // Create a per-process temp directory to avoid name collisions and allow cleanup on restart
+                var tempRoot = Path.Combine(Path.GetTempPath(), "PTVSCodeWSIcons");
+                Directory.CreateDirectory(tempRoot);
+
+                // Unique prefix per executable so stable/insiders/exploration don't overwrite each other
+                var prefix = instance.VSCodeVersion.ToString().ToLowerInvariant();
+                var workspaceIconFile = Path.Combine(tempRoot, $"{prefix}_workspace.png");
+                var remoteIconFile = Path.Combine(tempRoot, $"{prefix}_remote.png");
+
+                try
+                {
+                    workspaceOverlay.Save(workspaceIconFile, ImageFormat.Png);
+                    remoteOverlay.Save(remoteIconFile, ImageFormat.Png);
+                    instance.WorkspaceIcon = workspaceIconFile;
+                    instance.RemoteIcon = remoteIconFile;
+                }
+                catch
+                {
+                    // On failure, fall back to original base icons
+                    instance.WorkspaceIcon = folderPng;
+                    instance.RemoteIcon = monitorPng;
+                }
+
+                // Keep BitmapImage versions if some future UI consumer needs them (not used by PowerToys Run currently)
+                instance.WorkspaceIconBitMap = Bitmap2BitmapImage((Bitmap)Image.FromFile(instance.WorkspaceIcon));
+                instance.RemoteIconBitMap = Bitmap2BitmapImage((Bitmap)Image.FromFile(instance.RemoteIcon));
 
                 Instances.Add(instance);
             }

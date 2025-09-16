@@ -1,13 +1,16 @@
 {
   "ID": "525995402BEF4A8CA860D92F6D108092",
-  "Description": "Opens workspaces, remote machines (SSH or Codespaces) and containers, previously opened in VS Code.",
   "ActionKeyword": "{",
+  "IsGlobal": false,
   "Name": "VS Code Workspaces",
-  "Author": "ricardosantos9521, MaskedRPGFan",
+  "Author": "MandalorianY",
   "Version": "1.4.1",
   "Language": "csharp",
-  "Website": "https://github.com/taooceros/Flow.Plugin.VSCodeWorkspace",
-  "ExecuteFileName": "Flow.Plugin.VSCodeWorkspaces.dll",
-  "IsGlobal": false,
-  "IcoPath": "Images\\code-light.png"
+  "Website": "https://github.com/MandalorianY/PowerToysRun.Plugin.VSCodeWorkspace",
+  "ExecuteFileName": "Community.PowerToys.Run.Plugin.VSCodeWorkspaces.dll",
+  "AssemblyName": "Community.PowerToys.Run.Plugin.VSCodeWorkspaces",
+  "TypeName": "Community.PowerToys.Run.Plugin.VSCodeWorkspaces.Main",
+  "IcoPathDark": "Images\\code-dark.png",
+  "IcoPathLight": "Images\\code-light.png",
+  "DynamicLoading": false
 }

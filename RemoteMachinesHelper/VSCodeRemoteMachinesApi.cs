@@ -3,13 +3,12 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
-using Flow.Plugin.VSCodeWorkspaces.SshConfigParser;
-using Flow.Plugin.VSCodeWorkspaces.VSCodeHelper;
+using Community.PowerToys.Run.Plugin.VSCodeWorkspaces.SshConfigParser;
+using Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper;
 
-namespace Flow.Plugin.VSCodeWorkspaces.RemoteMachinesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.RemoteMachinesHelper
 {
     public class VSCodeRemoteMachinesApi
     {
@@ -43,15 +42,15 @@ namespace Flow.Plugin.VSCodeWorkspaces.RemoteMachinesHelper
                             {
                                 var path = pathElement.GetString();
 
-                                if (File.Exists(path))
+                                if (path != null && File.Exists(path))
                                 {
                                     foreach (SshHost h in SshConfig.ParseFile(path))
                                     {
                                         var machine = new VSCodeRemoteMachine();
-                                        machine.Host = h.Host;
+                                        machine.Host = h.Host ?? string.Empty;
                                         machine.VSCodeInstance = vscodeInstance;
-                                        machine.HostName = h.HostName != null ? h.HostName : string.Empty;
-                                        machine.User = h.User != null ? h.User : string.Empty;
+                                        machine.HostName = h.HostName ?? string.Empty;
+                                        machine.User = h.User ?? string.Empty;
 
                                         results.Add(machine);
                                     }
@@ -60,8 +59,8 @@ namespace Flow.Plugin.VSCodeWorkspaces.RemoteMachinesHelper
                         }
                         catch (Exception ex)
                         {
-                            var message = $"Failed to deserialize ${vscode_settings}";
-                            Main.Context.API.LogException("VSCodeWorkSpaces", message, ex);
+                            var message = $"Failed to deserialize {vscode_settings}";
+                            Wox.Plugin.Logger.Log.Error($"VSCodeWorkSpaces: {message} Exception: {ex.Message}", typeof(VSCodeRemoteMachinesApi));
                         }
                     }
                 }

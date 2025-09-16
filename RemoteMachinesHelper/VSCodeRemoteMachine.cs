@@ -3,20 +3,23 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using Flow.Plugin.VSCodeWorkspaces.VSCodeHelper;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper;
 
-namespace Flow.Plugin.VSCodeWorkspaces.RemoteMachinesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.RemoteMachinesHelper
 {
     public class VSCodeRemoteMachine : IEquatable<VSCodeRemoteMachine>
     {
-        public string Host { get; set; }
+        public string Host { get; set; } = string.Empty;
 
-        public string User { get; set; }
+        public string User { get; set; } = string.Empty;
 
-        public string HostName { get; set; }
+        public string HostName { get; set; } = string.Empty;
 
-        public VSCodeInstance VSCodeInstance { get; set; }
-        public bool Equals(VSCodeRemoteMachine other)
+        public VSCodeInstance? VSCodeInstance { get; set; }
+        public bool Equals(VSCodeRemoteMachine? other)
         {
             if (ReferenceEquals(null, other))
                 return false;
@@ -24,13 +27,13 @@ namespace Flow.Plugin.VSCodeWorkspaces.RemoteMachinesHelper
                 return true;
             return Host == other.Host && User == other.User && HostName == other.HostName && Equals(VSCodeInstance, other.VSCodeInstance);
         }
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             if (ReferenceEquals(null, obj))
                 return false;
             if (ReferenceEquals(this, obj))
                 return true;
-            if (obj.GetType() != this.GetType())
+            if (obj?.GetType() != this.GetType())
                 return false;
             return Equals((VSCodeRemoteMachine)obj);
         }

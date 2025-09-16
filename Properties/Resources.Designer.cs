@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace Flow.Plugin.VSCodeWorkspaces.Properties {
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.Properties {
     using System;
     
     
@@ -39,7 +39,8 @@ namespace Flow.Plugin.VSCodeWorkspaces.Properties {
         public static global::System.Resources.ResourceManager ResourceManager {
             get {
                 if (object.ReferenceEquals(resourceMan, null)) {
-                    global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Flow.Plugin.VSCodeWorkspaces.Properties.Resources", typeof(Resources).Assembly);
+                    // Fixed base name to match actual embedded resource (was Flow.Plugin.VSCodeWorkspaces... causing MissingManifestResourceException)
+                    global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Community.PowerToys.Run.Plugin.VSCodeWorkspaces.Properties.Resources", typeof(Resources).Assembly);
                     resourceMan = temp;
                 }
                 return resourceMan;
@@ -68,64 +69,43 @@ namespace Flow.Plugin.VSCodeWorkspaces.Properties {
                 return ResourceManager.GetString("Add", resourceCulture);
             }
         }
-        
-        /// <summary>
-        ///   查找类似 Delete 的本地化字符串。
-        /// </summary>
         public static string Delete {
             get {
                 return ResourceManager.GetString("Delete", resourceCulture);
             }
         }
-        
-        /// <summary>
-        ///   查找类似 Discover Remote Machines 的本地化字符串。
-        /// </summary>
         public static string DiscoverMachines {
             get {
                 return ResourceManager.GetString("DiscoverMachines", resourceCulture);
             }
         }
         
-        /// <summary>
-        ///   查找类似 Automatically discover remote machines configured in settings.json. 的本地化字符串。
-        /// </summary>
         public static string DiscoverMachinesTooltip {
             get {
                 return ResourceManager.GetString("DiscoverMachinesTooltip", resourceCulture);
             }
         }
-        
-        /// <summary>
-        ///   查找类似 Discover Workspaces 的本地化字符串。
-        /// </summary>
+
         public static string DiscoverWorkspaces {
             get {
                 return ResourceManager.GetString("DiscoverWorkspaces", resourceCulture);
             }
         }
         
-        /// <summary>
         ///   查找类似 Automatically discover workspaces (folders) from recent opened list of VSCode. 的本地化字符串。
-        /// </summary>
         public static string DiscoverWorkspacesTooltip {
             get {
                 return ResourceManager.GetString("DiscoverWorkspacesTooltip", resourceCulture);
             }
         }
         
-        /// <summary>
         ///   查找类似 Extra Folder URI 的本地化字符串。
-        /// </summary>
         public static string ExtraFolderUri {
             get {
                 return ResourceManager.GetString("ExtraFolderUri", resourceCulture);
             }
         }
-        
-        /// <summary>
-        ///   查找类似 in 的本地化字符串。
-        /// </summary>
+
         public static string In {
             get {
                 return ResourceManager.GetString("In", resourceCulture);

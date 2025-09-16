@@ -5,14 +5,14 @@
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace Flow.Plugin.VSCodeWorkspaces.WorkspacesHelper
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
 {
     public class OpenedPathsList
     {
         [JsonPropertyName("workspaces3")]
-        public List<dynamic> Workspaces3 { get; set; }
+        public List<dynamic>? Workspaces3 { get; set; }
 
         [JsonPropertyName("entries")]
-        public List<VSCodeWorkspaceEntry> Entries { get; set; }
+        public List<VSCodeWorkspaceEntry>? Entries { get; set; }
     }
 }

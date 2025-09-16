@@ -7,13 +7,10 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace Flow.Plugin.VSCodeWorkspaces.SshConfigParser
+namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.SshConfigParser
 {
     public class SshConfig
     {
-        private static readonly Regex _sshConfig = new Regex(@"^(\w[\s\S]*?\w)$(?=(?:\s+^\w|\z))", RegexOptions.Multiline);
-        private static readonly Regex _keyValue = new Regex(@"(\w+\s\S+)", RegexOptions.Multiline);
-
         public static IEnumerable<SshHost> ParseFile(string path)
         {
             return Parse(File.ReadAllText(path));
@@ -21,21 +18,55 @@ namespace Flow.Plugin.VSCodeWorkspaces.SshConfigParser
 
         public static IEnumerable<SshHost> Parse(string str)
         {
-            str = str.Replace('\r', '\0');
             var list = new List<SshHost>();
-            foreach (Match match in _sshConfig.Matches(str))
+
+            using (var reader = new StringReader(str))
             {
-                var sshHost = new SshHost();
-                string content = match.Groups.Values.ToList()[0].Value;
-                foreach (Match match1 in _keyValue.Matches(content))
+                string? line;
+                SshHost? current = null;
+
+                while ((line = reader.ReadLine()) != null)
                 {
-                    var split = match1.Value.Split(" ");
-                    var key = split[0];
-                    var value = split[1];
-                    sshHost.Properties[key] = value;
+                    // Normalize and ignore comments/empty lines
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    var trimmed = line.Trim();
+                    if (trimmed.StartsWith("#"))
+                        continue;
+
+                    // Split into key and value (value may contain spaces)
+                    var parts = trimmed.Split(new[] { ' ' }, 2, System.StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 0)
+                        continue;
+
+                    var key = parts[0];
+                    var value = parts.Length > 1 ? parts[1].Trim() : string.Empty;
+
+                    if (key.Equals("Host", System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Start of a new host block. Add previous if exists.
+                        if (current != null)
+                        {
+                            list.Add(current);
+                        }
+
+                        current = new SshHost();
+                        // The Host directive can contain multiple patterns; keep as-is
+                        current["Host"] = value;
+                        current.Host = value;
+                    }
+                    else if (current != null)
+                    {
+                        // Other directives are stored on the current host
+                        current[key] = value;
+                    }
                 }
 
-                list.Add(sshHost);
+                if (current != null)
+                {
+                    list.Add(current);
+                }
             }
 
             return list;
