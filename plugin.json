@@ -4,7 +4,7 @@
   "IsGlobal": false,
   "Name": "VS Code Workspaces",
   "Author": "MandalorianY",
-  "Version": "1.4.1",
+  "Version": "1.4.2",
   "Language": "csharp",
   "Website": "https://github.com/MandalorianY/PowerToysRun.Plugin.VSCodeWorkspace",
   "ExecuteFileName": "Community.PowerToys.Run.Plugin.VSCodeWorkspaces.dll",

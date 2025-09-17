@@ -70,7 +70,6 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
         public List<Result> Query(Query query)
         {
             var results = new List<Result>();
-            var workspaces = new List<VsCodeWorkspace>();
 
             VSCodeInstances.LoadVSCodeInstances();
 
@@ -84,12 +83,10 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
             // Search opened workspaces
             if (DiscoverWorkspaces)
             {
-                workspaces.AddRange(_workspacesApi.Workspaces);
+                var workspaceResults = _workspacesApi.Workspaces.Select(CreateWorkspaceResult).ToList();
+                Log.Info("Adding workspace results: " + string.Join(" | ", workspaceResults.Select((r, i) => $"#{i}:{r.Title}")), GetType());
+                results.AddRange(workspaceResults);
             }
-            // Simple de-duplication
-            results.AddRange(workspaces.Distinct()
-                .Select(CreateWorkspaceResult)
-            );
 
             if (DiscoverMachines)
             {
@@ -102,15 +99,10 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
                         title += $" [{a.User}@{a.HostName}]";
                     }
 
-                    if (results.Any(r => string.Equals(r.Title, title, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        continue;
-                    }
-
                     var tooltip = Resources.SSHRemoteMachine;
 
                     var instanceIcon = a.VSCodeInstance?.RemoteIcon ?? IconPath ?? string.Empty;
-                    results.Add(new Result
+                    var machineResult = new Result
                     {
                         QueryTextDisplay = query.Search,
                         IcoPath = instanceIcon,
@@ -141,123 +133,58 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
                             }
                         },
                         ContextData = a,
-                    });
+                    };
+
+                    Log.Info($"Adding machine result: {machineResult.Title}", GetType());
+                    results.Add(machineResult);
                 }
             }
 
             Log.Info("After adding remote machines:" + string.Join(" | ", results.Select((r, i) => $"#{i}:{r.Title}")), GetType());
 
-            // Filter & score results based on search query
+            // If there's a search query, perform a simple case-insensitive token-based filter
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 Log.Info("Filtering with query: " + query.Search, GetType());
                 var search = query.Search.Trim();
                 var tokens = search.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-                bool OrderedSubsequence(string source, string pattern)
-                {
-                    if (string.IsNullOrEmpty(source) || string.IsNullOrEmpty(pattern)) return false;
-                    var si = 0; // index in source
-                    foreach (var pc in pattern)
-                    {
-                        var found = false;
-                        while (si < source.Length)
-                        {
-                            if (char.ToLowerInvariant(source[si]) == char.ToLowerInvariant(pc))
-                            {
-                                found = true;
-                                si++;
-                                break;
-                            }
-                            si++;
-                        }
-                        if (!found) return false;
-                    }
-                    return true;
-                }
-
-                int IndexOfCI(string source, string value)
-                {
-                    return source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) ?? -1;
-                }
-
-                static int RankIndex(int index)
-                {
-                    if (index < 0) return 0;
-                    if (index == 0) return 20;
-                    return Math.Max(1, 15 - index);
-                }
-
-                List<Result> filtered = new();
+                var filtered = new List<Result>();
                 foreach (var r in results)
                 {
                     var title = r.Title ?? string.Empty;
                     var sub = r.SubTitle ?? string.Empty;
 
-                    // Token rule: each token must appear in title or subtitle (CI)
+                    // Require that every token appears in either the title or subtitle (case-insensitive)
                     var allTokensPresent = tokens.All(t =>
                         (!string.IsNullOrEmpty(title) && title.Contains(t, StringComparison.OrdinalIgnoreCase)) ||
                         (!string.IsNullOrEmpty(sub) && sub.Contains(t, StringComparison.OrdinalIgnoreCase)));
 
-                    if (!allTokensPresent)
-                    {
-                        // As a fallback allow ordered subsequence of full search inside title
-                        if (!OrderedSubsequence(title, search))
-                        {
-                            continue; // filtered out
-                        }
-                    }
-
-                    var score = 0;
-
-                    // Exact token matches & positioning
-                    foreach (var t in tokens)
-                    {
-                        var idxTitle = IndexOfCI(title, t);
-                        var idxSub = IndexOfCI(sub, t);
-                        if (idxTitle >= 0)
-                        {
-                            score += 30 + RankIndex(idxTitle);
-                        }
-                        else if (idxSub >= 0)
-                        {
-                            score += 15 + RankIndex(idxSub);
-                        }
-                    }
-
-                    // Ordered subsequence bonus (only if not all tokens present but subsequence matched)
-                    if (!allTokensPresent && OrderedSubsequence(title, search))
-                    {
-                        score += 10 + search.Length; // small bonus proportional to length
-                    }
-
-                    // Length heuristic: shorter titles that match get a slight boost
-                    if (score > 0 && title.Length > 0)
-                    {
-                        score += Math.Max(0, 10 - Math.Min(10, title.Length / 10));
-                    }
-
-                    r.Score = score;
-                    if (score > 0)
+                    if (allTokensPresent)
                     {
                         filtered.Add(r);
                     }
                 }
 
-                // Order by score desc then title asc for stability
-                results = filtered
-                    .OrderByDescending(r => r.Score)
-                    .ThenBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                // Preserve original ordering (assumed to be recent-first from the data source)
+                results = filtered;
+                Log.Info("Filtered results (preserving discovery order): " + string.Join(" | ", results.Select((r, i) => $"#{i}:{r.Title}")), GetType());
             }
             else
             {
-                // Sort by title for no query
-                results = results.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase).ToList();
+                // No query: keep the discovery order (most recent first)
+                Log.Info("Results (no query) preserving discovery order: " + string.Join(" | ", results.Select((r, i) => $"#{i}:{r.Title}")), GetType());
             }
             
+            results = DeduplicateResults(results);
             return results;
         }
+
+        private List<Result> DeduplicateResults(List<Result> results)
+        {
+            return results.GroupBy(r => r.Title).Select(g => g.First()).ToList();
+        }
+
         public void Init(PluginInitContext context)
         {
             Log.Info("Init", GetType());
@@ -305,23 +232,7 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
                         // Check for Ctrl modifier to open in file explorer
                         if (c.SpecialKeyState.CtrlPressed)
                         {
-                            var path = SystemPath.RealPath(ws.RelativePath);
-                            try
-                            {
-                                Process.Start(new ProcessStartInfo
-                                {
-                                    FileName = "explorer.exe",
-                                    Arguments = $"\"{path}\"",
-                                    UseShellExecute = true
-                                });
-                            }
-                            catch (Exception ex)
-                            {
-                                Log.Error($"Failed to open folder in explorer: {ex.Message}", GetType());
-                                Context?.API?.ShowMsg(Name, "Failed to open folder in explorer", string.Empty);
-                                return false;
-                            }
-                            return true;
+                            return OpenFolderInExplorer(SystemPath.RealPath(ws.RelativePath));
                         }
 
                         var process = new ProcessStartInfo
@@ -349,6 +260,26 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
                 },
                 ContextData = ws,
             };
+        }
+
+        private bool OpenFolderInExplorer(string path)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{path}\"",
+                    UseShellExecute = true
+                });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Failed to open folder in explorer: {ex.Message}", GetType());
+                Context?.API?.ShowMsg(Name, "Failed to open folder in explorer", string.Empty);
+                return false;
+            }
         }
 
         public Control CreateSettingPanel() => throw new NotImplementedException();
@@ -391,7 +322,7 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
             Log.Info("LoadContextMenus", GetType());
 
             var results = new List<ContextMenuResult>();
-            
+
             if (selectedResult.ContextData is VsCodeWorkspace ws && ws.WorkspaceLocation == WorkspaceLocation.Local)
             {
                 results.Add(new ContextMenuResult
@@ -402,27 +333,10 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
                     Glyph = "\xE838", // Folder
                     AcceleratorKey = Key.Enter,
                     AcceleratorModifiers = ModifierKeys.Control,
-                    Action = _ =>
-                    {
-                        var path = SystemPath.RealPath(ws.RelativePath);
-                        try
-                        {
-                            Process.Start(new ProcessStartInfo
-                            {
-                                FileName = "explorer.exe",
-                                Arguments = $"\"{path}\"",
-                                UseShellExecute = true
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error($"Failed to open folder in explorer: {ex.Message}", GetType());
-                            Context?.API?.ShowMsg(Name, "Failed to open folder in explorer", string.Empty);
-                            return false;
-                        }
-                        return true;
-                    },
+                    Action = _ => OpenFolderInExplorer(SystemPath.RealPath(ws.RelativePath)),
                 });
+                
+                Log.Info("After adding open folder context menu", GetType());
             }
 
             return results;
