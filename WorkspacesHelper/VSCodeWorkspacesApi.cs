@@ -10,11 +10,19 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper;
 using Microsoft.Data.Sqlite;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
 {
     public class VSCodeWorkspacesApi
     {
+        private List<VsCodeWorkspace>? _cachedWorkspaces;
+        private DateTime _lastCacheUpdate = DateTime.MinValue;
+        private readonly TimeSpan _cacheLifetime = TimeSpan.FromSeconds(30);
+        private readonly object _cacheLock = new object();
+        private Task<List<VsCodeWorkspace>>? _loadingTask;
+
         public VSCodeWorkspacesApi()
         {
         }
@@ -55,9 +63,60 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
         {
             get
             {
-                var results = new List<VsCodeWorkspace>();
+                lock (_cacheLock)
+                {
+                    // Return cached results if still valid
+                    if (_cachedWorkspaces != null && DateTime.Now - _lastCacheUpdate < _cacheLifetime)
+                    {
+                        return _cachedWorkspaces;
+                    }
 
-                foreach (var vscodeInstance in VSCodeInstances.Instances)
+                    // If a loading task is already in progress, wait for it (with timeout)
+                    if (_loadingTask != null && !_loadingTask.IsCompleted)
+                    {
+                        try
+                        {
+                            var timeoutTask = Task.Delay(2000); // 2 second timeout
+                            var completedTask = Task.WaitAny(_loadingTask, timeoutTask);
+                            
+                            if (completedTask == 0 && _loadingTask.IsCompletedSuccessfully)
+                            {
+                                _cachedWorkspaces = _loadingTask.Result;
+                                _lastCacheUpdate = DateTime.Now;
+                                return _cachedWorkspaces;
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore timeout/task exceptions, fall back to synchronous loading
+                        }
+                    }
+
+                    // Start background loading for next time, but return synchronous results now
+                    _loadingTask = Task.Run(LoadWorkspacesAsync);
+
+                    // Load synchronously for immediate return
+                    var results = LoadWorkspacesSync();
+                    _cachedWorkspaces = results;
+                    _lastCacheUpdate = DateTime.Now;
+                    
+                    return results;
+                }
+            }
+        }
+
+        private async Task<List<VsCodeWorkspace>> LoadWorkspacesAsync()
+        {
+            return await Task.Run(LoadWorkspacesSync);
+        }
+
+        private List<VsCodeWorkspace> LoadWorkspacesSync()
+        {
+            var results = new List<VsCodeWorkspace>();
+
+            foreach (var vscodeInstance in VSCodeInstances.Instances)
+            {
+                try
                 {
                     // Try SQLite database first (preferred method)
                     var sqliteWorkspaces = GetWorkspacesFromSqliteDatabase(vscodeInstance);
@@ -73,9 +132,14 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.WorkspacesHelper
                         results.AddRange(legacyWorkspaces);
                     }
                 }
-
-                return results;
+                catch (Exception ex)
+                {
+                    // Log error but continue with other instances
+                    System.Diagnostics.Debug.WriteLine($"Error loading workspaces for instance {vscodeInstance.ExecutablePath}: {ex.Message}");
+                }
             }
+
+            return results;
         }
         private List<VsCodeWorkspace> GetWorkspacesFromSqliteDatabase(VSCodeInstance vscodeInstance)
         {

@@ -9,6 +9,8 @@ using ManagedCommon;
 using Microsoft.PowerToys.Settings.UI.Library;
 using Wox.Plugin;
 using Wox.Plugin.Logger;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
 {
@@ -50,234 +52,216 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
         };
 
         private bool DiscoverWorkspaces { get; set; } = true;
-
         private bool DiscoverMachines { get; set; } = true;
-
-        // Made static so other helper classes can log/errors via Main.Context
         public static PluginInitContext? Context { get; set; }
-
         private string? IconPath { get; set; }
-
         private bool Disposed { get; set; }
-
         private VSCodeInstance? _defaultInstance;
-
         private readonly VSCodeWorkspacesApi _workspacesApi = new();
-
         private readonly VSCodeRemoteMachinesApi _machinesApi = new();
+        
+        // Background loading and caching
+        private Timer? _refreshTimer;
+        private volatile bool _isInitialLoadComplete = false;
+        private readonly object _loadLock = new object();
+        private Task? _backgroundLoadTask;
 
-        /// Return a filtered list, based on the given query.
         public List<Result> Query(Query query)
         {
             var results = new List<Result>();
+            var searchTokens = GetSearchTokens(query.Search);
 
-            VSCodeInstances.LoadVSCodeInstances();
-
-            // User defined extra workspaces (if needed in future)
-            // if (_defaultInstance != null)
-            // {
-            //     workspaces.AddRange(_settings.CustomWorkspaces.Select(uri =>
-            //         VSCodeWorkspacesApi.ParseVSCodeUri(uri, _defaultInstance)));
-            // }
-
-            // Search opened workspaces
-            if (DiscoverWorkspaces)
+            try
             {
-                var workspaceResults = _workspacesApi.Workspaces.Select(CreateWorkspaceResult).ToList();
-                Log.Info("Adding workspace results: " + string.Join(" | ", workspaceResults.Select((r, i) => $"#{i}:{r.Title}")), GetType());
-                results.AddRange(workspaceResults);
-            }
-
-            if (DiscoverMachines)
-            {
-                foreach (var a in _machinesApi.Machines)
+                if (!_isInitialLoadComplete)
                 {
-                    var title = $"{a.Host}";
-
-                    if (!string.IsNullOrEmpty(a.User) && !string.IsNullOrEmpty(a.HostName))
-                    {
-                        title += $" [{a.User}@{a.HostName}]";
-                    }
-
-                    var tooltip = Resources.SSHRemoteMachine;
-
-                    var instanceIcon = a.VSCodeInstance?.RemoteIcon ?? IconPath ?? string.Empty;
-                    var machineResult = new Result
-                    {
-                        QueryTextDisplay = query.Search,
-                        IcoPath = instanceIcon,
-                        Title = title,
-                        SubTitle = Resources.SSHRemoteMachine,
-                        ToolTipData = new ToolTipData("SSH Remote Machine", tooltip),
-                        Action = _ =>
-                        {
-                            try
-                            {
-                                var process = new ProcessStartInfo
-                                {
-                                    FileName = a.VSCodeInstance?.ExecutablePath ?? string.Empty,
-                                    UseShellExecute = true,
-                                    Arguments =
-                                        $"--new-window --enable-proposed-api ms-vscode-remote.remote-ssh --remote ssh-remote+{((char)34) + a.Host + ((char)34)}",
-                                    WindowStyle = ProcessWindowStyle.Hidden,
-                                };
-                                Process.Start(process);
-
-                                return true;
-                            }
-                            catch (Win32Exception ex)
-                            {
-                                Log.Error($"Failed to open SSH remote machine: {ex.Message}", GetType());
-                                Context?.API?.ShowMsg(Name, "Failed to open SSH remote machine", string.Empty);
-                                return false;
-                            }
-                        },
-                        ContextData = a,
-                    };
-
-                    Log.Info($"Adding machine result: {machineResult.Title}", GetType());
-                    results.Add(machineResult);
-                }
-            }
-
-            Log.Info("After adding remote machines:" + string.Join(" | ", results.Select((r, i) => $"#{i}:{r.Title}")), GetType());
-
-            // If there's a search query, perform a simple case-insensitive token-based filter
-            if (!string.IsNullOrWhiteSpace(query.Search))
-            {
-                Log.Info("Filtering with query: " + query.Search, GetType());
-                var search = query.Search.Trim();
-                var tokens = search.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-                var filtered = new List<Result>();
-                foreach (var r in results)
-                {
-                    var title = r.Title ?? string.Empty;
-                    var sub = r.SubTitle ?? string.Empty;
-
-                    // Require that every token appears in either the title or subtitle (case-insensitive)
-                    var allTokensPresent = tokens.All(t =>
-                        (!string.IsNullOrEmpty(title) && title.Contains(t, StringComparison.OrdinalIgnoreCase)) ||
-                        (!string.IsNullOrEmpty(sub) && sub.Contains(t, StringComparison.OrdinalIgnoreCase)));
-
-                    if (allTokensPresent)
-                    {
-                        filtered.Add(r);
-                    }
+                    results.Add(CreateLoadingResult());
+                    if (VSCodeInstances.Instances.Count > 0) AddResults(results, searchTokens);
+                    return DeduplicateResults(results);
                 }
 
-                // Preserve original ordering (assumed to be recent-first from the data source)
-                results = filtered;
-                Log.Info("Filtered results (preserving discovery order): " + string.Join(" | ", results.Select((r, i) => $"#{i}:{r.Title}")), GetType());
+                AddResults(results, searchTokens);
             }
-            else
+            catch (Exception ex)
             {
-                // No query: keep the discovery order (most recent first)
-                Log.Info("Results (no query) preserving discovery order: " + string.Join(" | ", results.Select((r, i) => $"#{i}:{r.Title}")), GetType());
+                Log.Error($"Error during query execution: {ex.Message}", GetType());
+                results.Add(CreateErrorResult());
             }
-            
-            results = DeduplicateResults(results);
-            return results;
+
+            return DeduplicateResults(results);
         }
+
+        private void AddResults(List<Result> results, string[] searchTokens)
+        {
+            if (DiscoverWorkspaces) TryAddScoredResults(results, _workspacesApi.Workspaces, searchTokens, CreateWorkspaceResult, GetWorkspaceSearchTargets, "workspaces");
+            if (DiscoverMachines) TryAddScoredResults(results, _machinesApi.Machines, searchTokens, CreateMachineResult, GetMachineSearchTargets, "remote machines");
+        }
+
+        private void TryAddScoredResults<T>(List<Result> results, IEnumerable<T> items, string[] searchTokens, 
+            Func<T, Result> createResult, Func<T, string[]> getSearchTargets, string description)
+        {
+            try 
+            { 
+                var scoredResults = items
+                    .Select(item => new { Item = item, Score = FuzzySearchHelper.GetBestMatchScore(searchTokens, getSearchTargets(item)) })
+                    .Where(x => x.Score > 0)
+                    .OrderByDescending(x => x.Score)
+                    .Select(x => 
+                    {
+                        var result = createResult(x.Item);
+                        result.Score = x.Score;
+                        return result;
+                    });
+                
+                results.AddRange(scoredResults);
+            }
+            catch (Exception ex) { Log.Error($"Error loading {description}: {ex.Message}", GetType()); }
+        }
+
+        private Result CreateLoadingResult() => new()
+        {
+            Title = "Loading VS Code workspaces...",
+            SubTitle = "Please wait while workspaces and remote machines are being discovered",
+            IcoPath = IconPath ?? string.Empty,
+            Score = int.MaxValue,
+            Action = _ => false
+        };
+
+        private Result CreateErrorResult() => new()
+        {
+            Title = "Error loading VS Code data",
+            SubTitle = "Try restarting PowerToys Run or check the logs for details",
+            IcoPath = IconPath ?? string.Empty,
+            Action = _ => false
+        };
+
+        private string[] GetSearchTokens(string search)
+        {
+            return string.IsNullOrWhiteSpace(search)
+                ? Array.Empty<string>()
+                : search.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+
+        private string[] GetWorkspaceSearchTargets(VsCodeWorkspace ws) => 
+            new[] { ws.FolderName.ToString(), SystemPath.RealPath(ws.RelativePath) ?? "", ws.Label ?? "" }
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToArray();
+
+        private string[] GetMachineSearchTargets(VSCodeRemoteMachine machine) => 
+            new[] { machine.Host ?? "", machine.User ?? "", machine.HostName ?? "" }
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToArray();
 
         private List<Result> DeduplicateResults(List<Result> results)
         {
-            return results.GroupBy(r => r.Title).Select(g => g.First()).ToList();
+            return results.GroupBy(r => r.Title)
+                .Select(g => g.OrderByDescending(r => r.Score).First())
+                .OrderByDescending(r => r.Score)
+                .ToList();
         }
 
         public void Init(PluginInitContext context)
         {
-            Log.Info("Init", GetType());
-
             Context = context ?? throw new ArgumentNullException(nameof(context));
             Context.API.ThemeChanged += OnThemeChanged;
             UpdateIconPath(Context.API.GetCurrentTheme());
 
-            VSCodeInstances.LoadVSCodeInstances();
-
-            // Prefer stable version, or the first one we got
-            _defaultInstance = VSCodeInstances.Instances.Find(e => e.VSCodeVersion == VSCodeVersion.Stable) ??
-                              VSCodeInstances.Instances.FirstOrDefault();
+            // Start background loading to avoid blocking the UI
+            StartBackgroundLoading();
+            
+            // Set up periodic refresh every 30 seconds to catch new workspaces and machines
+            _refreshTimer = new Timer(RefreshDataInBackground, null, 30000, 30000);
         }
 
         private Result CreateWorkspaceResult(VsCodeWorkspace ws)
         {
-            var title = $"{ws.FolderName}";
-            var typeWorkspace = ws.WorkspaceTypeToString();
-
-            if (ws.WorkspaceLocation != WorkspaceLocation.Local)
-            {
-                title = !string.IsNullOrEmpty(ws.Label)
-                    ? $"{ws.Label}"
-                    : $"{title}{(!string.IsNullOrEmpty(ws.ExtraInfo) ? $" - {ws.ExtraInfo}" : string.Empty)} ({typeWorkspace})";
-            }
-
-            var tooltip =
-                $"{Resources.Workspace}{(ws.WorkspaceLocation != WorkspaceLocation.Local ? $" {Resources.In} {typeWorkspace}" : string.Empty)}: {SystemPath.RealPath(ws.RelativePath)}";
-
+            var (title, tooltip) = BuildWorkspaceInfo(ws);
             return new Result
             {
                 QueryTextDisplay = ws.FolderName,
-                // Use the monitor (remote) icon for non-local workspaces, folder icon for local
-                IcoPath = ws.WorkspaceLocation != WorkspaceLocation.Local
-                    ? ws.VSCodeInstance?.RemoteIcon ?? IconPath ?? string.Empty
-                    : ws.VSCodeInstance?.WorkspaceIcon ?? IconPath ?? string.Empty,
+                IcoPath = GetWorkspaceIcon(ws),
                 Title = title,
                 SubTitle = tooltip,
                 ToolTipData = new ToolTipData("VS Code Workspace", tooltip),
-                Action = c =>
-                {
-                    try
-                    {
-                        // Check for Ctrl modifier to open in file explorer
-                        if (c.SpecialKeyState.CtrlPressed)
-                        {
-                            return OpenFolderInExplorer(SystemPath.RealPath(ws.RelativePath));
-                        }
-
-                        var process = new ProcessStartInfo
-                        {
-                            FileName = ws.VSCodeInstance?.ExecutablePath ?? string.Empty,
-                            UseShellExecute = true,
-                            WindowStyle = ProcessWindowStyle.Hidden,
-                        };
-
-                        process.ArgumentList.Add(ws.WorkspaceType == WorkspaceType.Workspace
-                            ? "--file-uri"
-                            : "--folder-uri");
-
-                        process.ArgumentList.Add(ws.Path);
-
-                        Process.Start(process);
-                        return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"Failed to open workspace: {ex.Message}", GetType());
-                        Context?.API?.ShowMsg(Name, "Failed to open workspace", string.Empty);
-                        return false;
-                    }
-                },
+                Action = c => OpenWorkspace(ws, c.SpecialKeyState.CtrlPressed),
                 ContextData = ws,
             };
         }
 
-        private bool OpenFolderInExplorer(string path)
+        private (string title, string tooltip) BuildWorkspaceInfo(VsCodeWorkspace ws)
+        {
+            var title = ws.WorkspaceLocation == WorkspaceLocation.Local ? ws.FolderName.ToString() :
+                !string.IsNullOrEmpty(ws.Label) ? ws.Label :
+                $"{ws.FolderName}{(!string.IsNullOrEmpty(ws.ExtraInfo) ? $" - {ws.ExtraInfo}" : "")} ({ws.WorkspaceTypeToString()})";
+            
+            var location = ws.WorkspaceLocation != WorkspaceLocation.Local ? $" {Resources.In} {ws.WorkspaceTypeToString()}" : "";
+            var tooltip = $"{Resources.Workspace}{location}: {SystemPath.RealPath(ws.RelativePath)}";
+            
+            return (title, tooltip);
+        }
+
+        private string GetWorkspaceIcon(VsCodeWorkspace ws) => 
+            ws.WorkspaceLocation != WorkspaceLocation.Local 
+                ? ws.VSCodeInstance?.RemoteIcon ?? IconPath ?? string.Empty
+                : ws.VSCodeInstance?.WorkspaceIcon ?? IconPath ?? string.Empty;
+
+        private bool OpenWorkspace(VsCodeWorkspace ws, bool ctrlPressed) => LaunchProcess(async () =>
+        {
+            if (ctrlPressed) return await LaunchProcessAsync("explorer.exe", $"\"{SystemPath.RealPath(ws.RelativePath)}\"", "folder in explorer");
+            
+            var uriFlag = ws.WorkspaceType == WorkspaceType.Workspace ? "--file-uri" : "--folder-uri";
+            return await LaunchProcessAsync(ws.VSCodeInstance?.ExecutablePath ?? "", $"{uriFlag} {ws.Path}", "workspace");
+        });
+
+        private Result CreateMachineResult(VSCodeRemoteMachine machine)
+        {
+            var title = BuildMachineTitle(machine);
+
+            return new Result
+            {
+                IcoPath = machine.VSCodeInstance?.RemoteIcon ?? IconPath ?? string.Empty,
+                Title = title,
+                SubTitle = Resources.SSHRemoteMachine,
+                ToolTipData = new ToolTipData("SSH Remote Machine", Resources.SSHRemoteMachine),
+                Action = _ => OpenSSHMachine(machine),
+                ContextData = machine,
+            };
+        }
+
+        private string BuildMachineTitle(VSCodeRemoteMachine machine) => 
+            machine.Host + (!string.IsNullOrEmpty(machine.User) && !string.IsNullOrEmpty(machine.HostName) ? $" [{machine.User}@{machine.HostName}]" : "");
+
+        private bool OpenSSHMachine(VSCodeRemoteMachine machine) => LaunchProcess(async () =>
+            await LaunchProcessAsync(machine.VSCodeInstance?.ExecutablePath ?? "", 
+                $"--new-window --enable-proposed-api ms-vscode-remote.remote-ssh --remote ssh-remote+{((char)34) + machine.Host + ((char)34)}", 
+                "SSH remote machine"));
+
+        private bool OpenInExplorer(string path) => LaunchProcess(async () => 
+            await LaunchProcessAsync("explorer.exe", $"\"{path}\"", "folder in explorer"));
+
+        private bool LaunchProcess(Func<Task<bool>> processFunc)
+        {
+            _ = Task.Run(processFunc);
+            return true;
+        }
+
+        private async Task<bool> LaunchProcessAsync(string fileName, string arguments, string description)
         {
             try
             {
-                Process.Start(new ProcessStartInfo
+                await Task.Run(() => Process.Start(new ProcessStartInfo
                 {
-                    FileName = "explorer.exe",
-                    Arguments = $"\"{path}\"",
-                    UseShellExecute = true
-                });
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                }));
                 return true;
             }
             catch (Exception ex)
             {
-                Log.Error($"Failed to open folder in explorer: {ex.Message}", GetType());
-                Context?.API?.ShowMsg(Name, "Failed to open folder in explorer", string.Empty);
+                Log.Error($"Failed to open {description}: {ex.Message}", GetType());
+                Context?.API?.ShowMsg(Name, $"Failed to open {description}", string.Empty);
                 return false;
             }
         }
@@ -286,41 +270,61 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
 
         public void UpdateSettings(PowerLauncherPluginSettings settings)
         {
-            Log.Info("UpdateSettings", GetType());
-
-            // Use FirstOrDefault instead of SingleOrDefault to avoid InvalidOperationException if duplicates exist.
-            DiscoverWorkspaces = settings?.AdditionalOptions?.FirstOrDefault(x => x.Key == nameof(DiscoverWorkspaces))?.Value ?? true;
-            DiscoverMachines = settings?.AdditionalOptions?.FirstOrDefault(x => x.Key == nameof(DiscoverMachines))?.Value ?? true;
+            var options = settings?.AdditionalOptions;
+            DiscoverWorkspaces = options?.FirstOrDefault(x => x.Key == nameof(DiscoverWorkspaces))?.Value ?? true;
+            DiscoverMachines = options?.FirstOrDefault(x => x.Key == nameof(DiscoverMachines))?.Value ?? true;
         }
+
+        private void StartBackgroundLoading()
+        {
+            if (_backgroundLoadTask?.IsCompleted == false) return;
+            _backgroundLoadTask = Task.Run(() => LoadData());
+        }
+
+        private void LoadData()
+        {
+            lock (_loadLock)
+            {
+                try
+                {
+                    VSCodeInstances.LoadVSCodeInstances();
+                    _defaultInstance = VSCodeInstances.Instances.Find(e => e.VSCodeVersion == VSCodeVersion.Stable) ?? VSCodeInstances.Instances.FirstOrDefault();
+                    
+                    if (DiscoverWorkspaces) _ = _workspacesApi.Workspaces.Count;
+                    if (DiscoverMachines) _ = _machinesApi.Machines.Count;
+                    
+                    _isInitialLoadComplete = true;
+                }
+                catch (Exception ex) { Log.Error($"Data loading failed: {ex.Message}", GetType()); }
+            }
+        }
+
+        private void RefreshDataInBackground(object? state) => StartBackgroundLoading();
+
         public void Dispose()
         {
-            Log.Info("Dispose", GetType());
-
             Dispose(true);
             GC.SuppressFinalize(this);
         }
+
         protected virtual void Dispose(bool disposing)
         {
-            if (Disposed || !disposing)
-            {
-                return;
-            }
+            if (Disposed || !disposing) return;
 
-            if (Context?.API != null)
-            {
-                Context.API.ThemeChanged -= OnThemeChanged;
-            }
-
+            Context?.API?.ThemeChanged -= OnThemeChanged;
+            _refreshTimer?.Dispose();
+            try { _backgroundLoadTask?.Wait(TimeSpan.FromSeconds(1)); }
+            catch (Exception ex) { Log.Error($"Error waiting for background task to complete: {ex.Message}", GetType()); }
+            
             Disposed = true;
         }
 
         private void UpdateIconPath(Theme theme) => IconPath = theme == Theme.Light || theme == Theme.HighContrastWhite ? Context?.CurrentPluginMetadata?.IcoPathLight : Context?.CurrentPluginMetadata?.IcoPathDark;
 
         private void OnThemeChanged(Theme currentTheme, Theme newTheme) => UpdateIconPath(newTheme);
+
         public List<ContextMenuResult> LoadContextMenus(Result selectedResult)
         {
-            Log.Info("LoadContextMenus", GetType());
-
             var results = new List<ContextMenuResult>();
 
             if (selectedResult.ContextData is VsCodeWorkspace ws && ws.WorkspaceLocation == WorkspaceLocation.Local)
@@ -330,13 +334,11 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces
                     PluginName = Name,
                     Title = "Open Folder (Ctrl+Enter)",
                     FontFamily = "Segoe Fluent Icons,Segoe MDL2 Assets",
-                    Glyph = "\xE838", // Folder
+                    Glyph = "\xE838",
                     AcceleratorKey = Key.Enter,
                     AcceleratorModifiers = ModifierKeys.Control,
-                    Action = _ => OpenFolderInExplorer(SystemPath.RealPath(ws.RelativePath)),
+                    Action = _ => OpenInExplorer(SystemPath.RealPath(ws.RelativePath)),
                 });
-                
-                Log.Info("After adding open folder context menu", GetType());
             }
 
             return results;

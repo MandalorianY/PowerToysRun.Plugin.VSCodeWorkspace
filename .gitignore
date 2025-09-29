@@ -7,3 +7,4 @@ Output/
 install.nu
 publish_output/
 PowerToys.Run.Plugin.VSCodeWorkspaces/
+.DS_Store

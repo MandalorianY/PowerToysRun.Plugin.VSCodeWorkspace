@@ -10,14 +10,19 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Windows.Media.Imaging;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper
 {
     public static class VSCodeInstances
     {
         private static string _systemPath = string.Empty;
-
         private static readonly string? _userAppDataPath = Environment.GetEnvironmentVariable("AppData");
+        private static readonly object _loadLock = new object();
+        private static Task? _loadingTask;
+        private static DateTime _lastLoadTime = DateTime.MinValue;
+        private static readonly TimeSpan _loadInterval = TimeSpan.FromMinutes(5); // Reload every 5 minutes
 
         public static List<VSCodeInstance> Instances { get; set; } = new();
 
@@ -62,13 +67,42 @@ namespace Community.PowerToys.Run.Plugin.VSCodeWorkspaces.VSCodeHelper
         // Gets the executablePath and AppData foreach instance of VSCode
         public static void LoadVSCodeInstances()
         {
-            if (_systemPath == Environment.GetEnvironmentVariable("PATH"))
+            lock (_loadLock)
+            {
+                var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                var currentTime = DateTime.Now;
+
+                // Skip loading if PATH hasn't changed and we loaded recently
+                if (_systemPath == currentPath && currentTime - _lastLoadTime < _loadInterval)
+                    return;
+
+                LoadVSCodeInstancesInternal();
+                _lastLoadTime = currentTime;
+            }
+        }
+
+        public static async Task LoadVSCodeInstancesAsync()
+        {
+            if (_loadingTask != null && !_loadingTask.IsCompleted)
+            {
+                await _loadingTask;
+                return;
+            }
+
+            _loadingTask = Task.Run(LoadVSCodeInstances);
+            await _loadingTask;
+        }
+
+        private static void LoadVSCodeInstancesInternal()
+        {
+            var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            
+            if (_systemPath == currentPath && Instances.Count > 0)
                 return;
 
-
             Instances = new List<VSCodeInstance>();
-
-            _systemPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            _systemPath = currentPath;
+            
             var paths = _systemPath.Split(";").Where(x =>
                 x.Contains("VS Code", StringComparison.OrdinalIgnoreCase) ||
                 x.Contains("codium", StringComparison.OrdinalIgnoreCase) ||
